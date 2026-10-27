@@ -4,6 +4,45 @@ A Flutter chess app that teaches while you play. Every move you make is graded
 by a built-in engine; when a better idea exists the AI coach explains the
 principle behind it and lets you take the move back and try again.
 
+## Download
+
+Get the Android APK from the [latest release](https://github.com/rkprince101/chess-coach/releases/latest)
+(Android 5.0+; allow installing from this source when prompted).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/home_dark.png" width="220" alt="Home screen, dark theme"></td>
+    <td><img src="docs/screenshots/play_dark.png" width="220" alt="Play & Learn with live coach feedback"></td>
+    <td><img src="docs/screenshots/hint_dark.png" width="220" alt="Third hint drawn as an arrow on the board"></td>
+    <td><img src="docs/screenshots/leave_dark.png" width="220" alt="Leave this game dialog: save, keep playing or discard"></td>
+  </tr>
+  <tr>
+    <td align="center">Home</td>
+    <td align="center">Play &amp; Learn: every move graded</td>
+    <td align="center">Three-level hints</td>
+    <td align="center">Save or discard on exit</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/resume_light.png" width="220" alt="Saved game restored, light theme"></td>
+    <td><img src="docs/screenshots/lesson_light.png" width="220" alt="Interactive knight lesson"></td>
+    <td><img src="docs/screenshots/library_light.png" width="220" alt="Concept Library topics"></td>
+    <td><img src="docs/screenshots/settings_light.png" width="220" alt="Settings in Material 3 segmented lists"></td>
+  </tr>
+  <tr>
+    <td align="center">Resume a saved game</td>
+    <td align="center">Interactive lessons</td>
+    <td align="center">Concept Library</td>
+    <td align="center">Settings</td>
+  </tr>
+</table>
+
+Material 3 throughout: the board and highlights follow the theme color, the
+faceted piece set is drawn in code, lists use segmented containers, and the
+app runs edge-to-edge. The launcher icon follows Material You dynamic color on
+Android 12+ and supports themed icons on Android 13+.
+
 ## What it does
 
 - **Play & Learn** – a full game against an adjustable opponent (levels 1–8).
