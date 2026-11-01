@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../coach/coach_service.dart';
 import '../../engine/engine_service.dart';
 import '../../models/move_quality.dart';
+import '../../services/match_history.dart';
 import '../../services/saved_game.dart';
 import '../../services/settings.dart';
 import '../../state/game_controller.dart';
@@ -19,6 +20,7 @@ import '../widgets/coach_feed.dart';
 import '../widgets/eval_bar.dart';
 import '../widgets/expressive_dialog.dart';
 import '../widgets/move_list.dart';
+import 'analysis_screen.dart';
 import 'settings_screen.dart';
 
 class PlayScreen extends StatefulWidget {
@@ -49,6 +51,7 @@ class _PlayScreenState extends State<PlayScreen> {
           coach: context.read<CoachService>(),
           settings: context.read<SettingsController>(),
           voice: context.read<VoiceService>(),
+          matchHistory: Provider.of<MatchHistory?>(context, listen: false),
         );
     _game.addListener(_onGameChanged);
     if (_ownsController) {
@@ -120,6 +123,7 @@ class _PlayScreenState extends State<PlayScreen> {
       case _LeaveChoice.save:
         await SavedGameStore.save(_game.snapshot());
       case _LeaveChoice.discard:
+        _game.recordAbandoned();
         await SavedGameStore.clear();
       case _LeaveChoice.stay || null:
         return;
@@ -148,11 +152,23 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   Future<void> _showGameOver() async {
-    final playAgain = await showExpressiveDialog<bool>(
+    final choice = await showExpressiveDialog<_GameOverChoice>(
       context: context,
       builder: (_) => _GameOverDialog(game: _game),
     );
-    if (playAgain == true && mounted) _pickSideAndStart();
+    if (!mounted) return;
+    if (choice == _GameOverChoice.review) {
+      _game.startReview();
+      return;
+    }
+    if (choice == _GameOverChoice.analyse) {
+      unawaited(Navigator.push(
+        context,
+        MaterialPageRoute<void>(builder: (_) => AnalysisScreen(record: _game.matchRecord())),
+      ));
+      return;
+    }
+    if (choice == _GameOverChoice.newGame) _pickSideAndStart();
   }
 
   Future<void> _confirmNewGame() async {
@@ -243,9 +259,11 @@ class _PlayScreenState extends State<PlayScreen> {
                 builder: (context, constraints) {
                   if (isWideLayout(constraints)) {
                     // Without the side panel, controls sit under the board instead.
+                    // Account for 48px vertical padding (24 top + 24 bottom) in the inner column.
+                    final availableHeight = constraints.maxHeight - 48;
                     final boardSize = showCoachPanel
-                        ? sideBySideBoardSize(constraints)
-                        : math.max(200.0, math.min(sideBySideBoardSize(constraints), constraints.maxHeight - 160));
+                        ? math.max(200.0, math.min(availableHeight.toDouble(), sideBySideBoardSize(constraints)))
+                        : math.max(200.0, math.min(sideBySideBoardSize(constraints), availableHeight - 112.0));
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -330,6 +348,7 @@ class _PlayScreenState extends State<PlayScreen> {
 }
 
 enum _LeaveChoice { save, discard, stay }
+enum _GameOverChoice { newGame, review, analyse }
 
 class _SidePanel extends StatelessWidget {
   const _SidePanel({required this.game, this.compact = false});
@@ -357,7 +376,12 @@ class _SidePanel extends StatelessWidget {
                 _PreviewPanel(game: game, compact: compact),
                 SizedBox(height: compact ? 4 : 8),
               ],
-              if (coaching) _CoachingPrompt(game: game, compact: compact) else _ActionRow(game: game, compact: compact),
+              if (game.phase == GamePhase.review)
+                _ReviewPanel(game: game, compact: compact)
+              else if (coaching)
+                _CoachingPrompt(game: game, compact: compact)
+              else
+                _ActionRow(game: game, compact: compact),
               if (lastReview != null && !coaching && !compact) ...[
                 const SizedBox(height: 6),
                 _QualityChip(review: lastReview, game: game),
@@ -392,17 +416,62 @@ class _SidePanel extends StatelessWidget {
 
 /// End-of-game summary: result, how it ended, stats, move quality breakdown
 /// and (when the coach is on) the coach's summary as it streams in.
-class _GameOverDialog extends StatelessWidget {
+class _GameOverDialog extends StatefulWidget {
   const _GameOverDialog({required this.game});
 
   final GameController game;
 
   @override
+  State<_GameOverDialog> createState() => _GameOverDialogState();
+}
+
+class _GameOverDialogState extends State<_GameOverDialog> {
+  bool _reviewPrompted = false;
+
+  void _requestReview() {
+    final game = widget.game;
+    final scheme = Theme.of(context).colorScheme;
+    if (game.settings.hasApiKey) {
+      Navigator.pop(context, _GameOverChoice.review);
+      return;
+    }
+    if (_reviewPrompted) return;
+    _reviewPrompted = true;
+    showExpressiveDialog<bool>(
+      context: context,
+      builder: (context) => ExpressiveDialog(
+        icon: Icons.key_rounded,
+        iconColor: scheme.onTertiaryContainer,
+        badgeColor: scheme.tertiaryContainer,
+        title: 'Add an AI key to review',
+        message: 'The review replays your whole game and stops on every bad move so the coach can explain it — just like a Duolingo lesson. '
+            'Add a Grok, Claude or OpenAI key in Settings, then come back and tap "Review game".',
+        actions: [
+          ExpressiveDialog.primary(
+            icon: Icons.settings_outlined,
+            label: 'Open settings',
+            onPressed: () {
+              Navigator.pop(context, true);
+              Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+            },
+          ),
+          ExpressiveDialog.secondary(
+            icon: Icons.chevron_left_rounded,
+            label: 'Not now',
+            onPressed: () => Navigator.pop(context, false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final game = widget.game;
     return ListenableBuilder(
       listenable: game,
       builder: (context, _) {
-        final scheme = Theme.of(context).colorScheme;
         final winner = game.winner;
         final (title, icon, fg, bg) = winner == null
             ? ('Draw', Icons.handshake_rounded, scheme.onSecondaryContainer, scheme.secondaryContainer)
@@ -413,6 +482,7 @@ class _GameOverDialog extends StatelessWidget {
         final opening = game.openingName;
         final summary = _summary();
         final white = game.playerSide == Side.white;
+        final flagged = reviews.where((r) => r.quality.isBad).length;
         return ExpressiveDialog(
           icon: icon,
           iconColor: fg,
@@ -445,6 +515,14 @@ class _GameOverDialog extends StatelessWidget {
                 ],
               ),
               if (reviews.isNotEmpty) ...[const SizedBox(height: 20), _QualityBreakdown(reviews: reviews)],
+              if (flagged > 0) ...[
+                const SizedBox(height: 14),
+                Text(
+                  '$flagged move${flagged == 1 ? '' : 's'} flagged. Review replays the game and stops on each one.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                  textAlign: TextAlign.center,
+                ),
+              ],
               if (summary != null) ...[const SizedBox(height: 20), _CoachTake(message: summary)],
             ],
           ),
@@ -452,12 +530,17 @@ class _GameOverDialog extends StatelessWidget {
             ExpressiveDialog.primary(
               icon: Icons.replay_rounded,
               label: 'New game',
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(context, _GameOverChoice.newGame),
             ),
             ExpressiveDialog.secondary(
               icon: Icons.manage_search_rounded,
               label: 'Review game',
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: _requestReview,
+            ),
+            ExpressiveDialog.secondary(
+              icon: Icons.analytics_outlined,
+              label: 'Analyse game',
+              onPressed: () => Navigator.pop(context, _GameOverChoice.analyse),
             ),
           ],
         );
@@ -467,9 +550,9 @@ class _GameOverDialog extends StatelessWidget {
 
   /// The coach's end-of-game message, posted after the game-over notice.
   CoachMessage? _summary() {
-    final start = game.gameOverMessageIndex;
+    final start = widget.game.gameOverMessageIndex;
     if (start == null) return null;
-    return game.messages.skip(start).where((m) => m.kind == CoachMessageKind.coach).firstOrNull;
+    return widget.game.messages.skip(start).where((m) => m.kind == CoachMessageKind.coach).firstOrNull;
   }
 }
 
@@ -624,6 +707,7 @@ class _StatusRow extends StatelessWidget {
       GamePhase.analyzing => ('Checking your move…', Icons.search_rounded),
       GamePhase.coaching => ('Coach wants a word', Icons.school_rounded),
       GamePhase.engineThinking => ('Opponent is thinking…', Icons.hourglass_top_rounded),
+      GamePhase.review => ('Reviewing the game', Icons.school_rounded),
       GamePhase.gameOver => (game.gameOverText ?? 'Game over', Icons.flag_rounded),
     };
     final busy = game.phase == GamePhase.analyzing || game.phase == GamePhase.engineThinking;
@@ -861,6 +945,110 @@ class _QualityChip extends StatelessWidget {
             child: const Text('Show why'),
           ),
       ],
+    );
+  }
+}
+
+/// Controls for the post-game review: step back/forward, skip a flagged
+/// move, or dismiss the review and return to the game-over screen.
+class _ReviewPanel extends StatelessWidget {
+  const _ReviewPanel({required this.game, this.compact = false});
+
+  final GameController game;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final rv = game.review!;
+    final current = rv.reviewIndex;
+    final move = current != null ? game.history[current] : null;
+    final review = move?.review;
+    final q = review?.quality;
+    return Container(
+      padding: EdgeInsets.all(compact ? 8 : 12),
+      decoration: BoxDecoration(
+        color: (q?.color ?? scheme.primary).withValues(alpha: 0.10),
+        border: Border.all(color: (q?.color ?? scheme.primary).withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              if (q != null) ...[
+                Icon(q.icon, color: q.color, size: compact ? 20 : 24),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  current == null
+                      ? 'Replaying the game… move ${rv.boardIndex} of ${game.history.length}'
+                      : '${q!.label}: ${review!.san}  (${review.evalBefore} → ${review.evalAfter})',
+                  style: (compact ? text.titleSmall : text.titleMedium)?.copyWith(
+                    color: q?.color ?? scheme.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                '${rv.boardIndex} / ${game.history.length}',
+                style: text.labelMedium,
+              ),
+            ],
+          ),
+          if (current != null && !compact) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Red = what you played. Green = what the engine preferred.',
+              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ],
+          if (current != null && review!.bestSan != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              'Better: ${review.bestSan}',
+              style: text.bodySmall?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              IconButton.filledTonal(
+                tooltip: 'Previous move',
+                onPressed: rv.boardIndex > 0 ? game.reviewPrevious : null,
+                icon: const Icon(Icons.skip_previous_rounded),
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton.filled(
+                tooltip: rv.autoPlaying ? 'Pause' : 'Play',
+                onPressed: game.reviewTogglePlay,
+                icon: Icon(rv.autoPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                visualDensity: VisualDensity.compact,
+              ),
+              IconButton.filledTonal(
+                tooltip: current == null ? 'Next move' : 'Skip this one',
+                onPressed: game.reviewNext,
+                icon: const Icon(Icons.skip_next_rounded),
+                visualDensity: VisualDensity.compact,
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: game.reviewDismiss,
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                icon: const Icon(Icons.undo_rounded, size: 18),
+                label: const Text('Back to game'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

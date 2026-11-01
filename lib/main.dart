@@ -6,7 +6,9 @@ import 'package:provider/provider.dart';
 
 import 'coach/coach_service.dart';
 import 'engine/engine_service.dart';
+import 'services/match_history.dart';
 import 'services/settings.dart';
+import 'ui/fonts.dart';
 import 'ui/screens/home_screen.dart';
 import 'ui/widgets/segmented_list.dart';
 import 'voice/voice_service.dart';
@@ -36,18 +38,27 @@ class ChessCoachApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: voice ?? VoiceService(settings)),
         Provider(create: (_) => EngineService(), dispose: (_, e) => e.dispose()),
         Provider(create: (_) => CoachService(settings)),
+        ChangeNotifierProvider(create: (_) => MatchHistory()),
       ],
-      child: MaterialApp(
-        title: 'Chess Coach',
-        debugShowCheckedModeBanner: false,
-        theme: _theme(Brightness.light),
-        darkTheme: _theme(Brightness.dark),
-        themeMode: ThemeMode.system,
-        builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
-          value: _systemBars(Theme.of(context).brightness),
-          child: child!,
-        ),
-        home: const HomeScreen(),
+      // Rebuild the theme only when the theme color or font changes, not on
+      // every settings tweak.
+      child: Builder(
+        builder: (context) {
+          final seed = context.select<SettingsController, int>((s) => s.themeSeedColor);
+          final font = context.select<SettingsController, AppFont>((s) => s.appFont);
+          return MaterialApp(
+            title: 'Chess Coach',
+            debugShowCheckedModeBanner: false,
+            theme: _theme(Brightness.light, seed, font),
+            darkTheme: _theme(Brightness.dark, seed, font),
+            themeMode: ThemeMode.system,
+            builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+              value: _systemBars(Theme.of(context).brightness),
+              child: child!,
+            ),
+            home: const HomeScreen(),
+          );
+        },
       ),
     );
   }
@@ -68,14 +79,24 @@ class ChessCoachApp extends StatelessWidget {
     );
   }
 
-  ThemeData _theme(Brightness brightness) {
+  static ThemeData _theme(Brightness brightness, int seed, AppFont font) {
     final scheme = ColorScheme.fromSeed(
-      seedColor: Color(settings.themeSeedColor),
+      seedColor: Color(seed),
       brightness: brightness,
     );
+    final theme = _baseTheme(scheme, font);
+    if (font != AppFont.classic) return theme;
+    return theme.copyWith(
+      textTheme: classicTextTheme(theme.textTheme),
+      primaryTextTheme: classicTextTheme(theme.primaryTextTheme),
+    );
+  }
+
+  static ThemeData _baseTheme(ColorScheme scheme, AppFont font) {
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
+      fontFamily: font == AppFont.classic ? classicFontFamily : null,
       // Pages are one tone off the cards/list segments that sit on them.
       scaffoldBackgroundColor: pageColor(scheme),
       appBarTheme: AppBarTheme(

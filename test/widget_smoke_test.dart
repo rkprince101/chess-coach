@@ -3,6 +3,7 @@ import 'package:chess/services/settings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chess/voice/voice_service.dart';
 
 void main() {
   testWidgets('home, lessons and settings screens render', (tester) async {
@@ -12,10 +13,10 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(ChessCoachApp(settings: settings));
+    await tester.pumpWidget(ChessCoachApp(settings: settings, voice: VoiceService(settings)));
     await tester.pumpAndSettle();
     expect(find.text('Play & Learn'), findsOneWidget);
-    expect(find.textContaining('Add your AI API key'), findsOneWidget);
+    expect(find.textContaining('Add AI API key'), findsOneWidget);
 
     await tester.tap(find.text('Lessons'));
     await tester.pumpAndSettle();

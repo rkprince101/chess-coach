@@ -69,6 +69,31 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Classic font style (same families as Komi Store's "Classic" look). Nunito
+  # ships as static instances cut from its variable font, because Flutter
+  # does not map FontWeight onto a variable font's wght axis. Both are SIL OFL
+  # 1.1; licenses sit next to the files in assets/fonts.
+  fonts:
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Nunito-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Nunito-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Nunito-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Nunito-ExtraBold.ttf
+          weight: 800
+        - asset: assets/fonts/Nunito-Black.ttf
+          weight: 900
+    - family: GeistMono
+      fonts:
+        - asset: assets/fonts/GeistMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/GeistMono-Medium.ttf
+          weight: 500
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../state/game_controller.dart';
+import '../fonts.dart';
 
 /// Compact move list with a quality dot on each graded move. Tapping a move
 /// shows that position on the board; the "Live" chip returns to the game.
@@ -43,7 +44,7 @@ class MoveList extends StatelessWidget {
               children: [
                 Text('$prefix${h.san}',
                     style: TextStyle(
-                      fontFamily: 'monospace',
+                      fontFamily: monoFamily(context),
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     )),
                 if (quality != null) ...[
@@ -171,7 +172,7 @@ class _MoveStripState extends State<MoveStrip> {
                   Text('$prefix${h.san}',
                       style: TextStyle(
                         fontSize: 13,
-                        fontFamily: 'monospace',
+                        fontFamily: monoFamily(context),
                         fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                       )),
                   if (quality != null) ...[

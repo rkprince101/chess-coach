@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../services/settings.dart';
 import '../layout.dart';
 import '../widgets/segmented_list.dart';
+import 'history_screen.dart';
 import 'lessons_screen.dart';
 import 'library_screen.dart';
 import 'play_screen.dart';
@@ -70,6 +71,12 @@ class HomeScreen extends StatelessWidget {
                     title: 'Play & Learn',
                     subtitle: 'Game vs opponent • Elo ${settings.eloRating} • ${settings.eloLabel}',
                     onTap: () => _open(context, const PlayScreen()),
+                  ),
+                  _ModeTile(
+                    icon: Icons.analytics_rounded,
+                    title: 'Game history',
+                    subtitle: 'Every game you played, with full move-by-move analysis',
+                    onTap: () => _open(context, const HistoryScreen()),
                   ),
                   _ModeTile(
                     icon: Icons.menu_book_rounded,

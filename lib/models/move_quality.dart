@@ -4,23 +4,36 @@ import 'package:flutter/material.dart';
 
 import '../engine/search.dart';
 
+/// Move grades. Live coaching only uses best / good / book / inaccuracy /
+/// mistake / blunder; full-game analysis ([analyzeGame]) adds the rest.
 enum MoveQuality {
-  best('Best', Color(0xFF2E7D32), Icons.star_rounded),
-  good('Good', Color(0xFF4CAF50), Icons.check_circle_rounded),
-  book('Book', Color(0xFF8D6E63), Icons.menu_book_rounded),
-  inaccuracy('Inaccuracy', Color(0xFFF9A825), Icons.error_outline_rounded),
-  mistake('Mistake', Color(0xFFEF6C00), Icons.warning_amber_rounded),
-  blunder('Blunder', Color(0xFFC62828), Icons.dangerous_rounded);
+  brilliant('Brilliant', Color(0xFF1BACA6), Icons.auto_awesome_rounded, '!!'),
+  great('Great', Color(0xFF3F7FBF), Icons.priority_high_rounded, '!'),
+  best('Best', Color(0xFF2E7D32), Icons.star_rounded, ''),
+  excellent('Excellent', Color(0xFF43A047), Icons.thumb_up_alt_rounded, ''),
+  good('Good', Color(0xFF4CAF50), Icons.check_circle_rounded, ''),
+  book('Book', Color(0xFF8D6E63), Icons.menu_book_rounded, ''),
+  forced('Forced', Color(0xFF78909C), Icons.arrow_forward_rounded, ''),
+  inaccuracy('Inaccuracy', Color(0xFFF9A825), Icons.error_outline_rounded, '?!'),
+  mistake('Mistake', Color(0xFFEF6C00), Icons.warning_amber_rounded, '?'),
+  miss('Miss', Color(0xFFD84315), Icons.close_rounded, '?'),
+  blunder('Blunder', Color(0xFFC62828), Icons.dangerous_rounded, '??');
 
-  const MoveQuality(this.label, this.color, this.icon);
+  const MoveQuality(this.label, this.color, this.icon, this.annotation);
 
   final String label;
   final Color color;
   final IconData icon;
 
+  /// PGN move suffix ("!!", "?!", ...), empty for unremarkable moves.
+  final String annotation;
+
   /// Whether the coach should interrupt play and offer a retry.
   bool get needsCoaching =>
-      this == MoveQuality.inaccuracy || this == MoveQuality.mistake || this == MoveQuality.blunder;
+      this == MoveQuality.inaccuracy ||
+      this == MoveQuality.mistake ||
+      this == MoveQuality.miss ||
+      this == MoveQuality.blunder;
 
   bool get isBad => needsCoaching;
 }

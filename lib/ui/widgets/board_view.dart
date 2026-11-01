@@ -85,7 +85,7 @@ class _BoardViewState extends State<BoardView> {
       shapes: widget.shapes,
       settings: ChessboardSettings(
         colorScheme: board.colorScheme,
-        pieceAssets: BoardTheme.pieceAssets,
+        pieceAssets: board.pieceAssets,
         enablePremoves: false,
         autoQueenPromotion: false,
         // M3 standard easing duration for on-screen movement.

@@ -23,6 +23,31 @@ enum PlayerLevel {
   final String description;
 }
 
+/// Typeface for the whole app. [classic] is Nunito with Geist Mono for
+/// numbers, weighted like Komi Store's Classic look; [system] is the
+/// platform default (Roboto on Android).
+enum AppFont {
+  classic('Classic', 'Rounded Nunito, bold headings'),
+  system('System', 'The platform default font');
+
+  const AppFont(this.label, this.description);
+
+  final String label;
+  final String description;
+}
+
+/// How long the engine thinks on each position of a saved game's analysis.
+enum AnalysisStrength {
+  quick('Quick', 250),
+  standard('Standard', 700),
+  deep('Deep', 1800);
+
+  const AnalysisStrength(this.label, this.timeMs);
+
+  final String label;
+  final int timeMs;
+}
+
 /// LLM backends the coach can talk to. All but Claude speak the OpenAI
 /// `/chat/completions` protocol; [fixedBaseUrl] is null when the user
 /// supplies their own server address.
@@ -72,6 +97,10 @@ class SettingsController extends ChangeNotifier {
     eloRating = _prefs.getInt('eloRating') ?? 800;
     themeSeedColor = _prefs.getInt('themeSeedColor') ?? 0xFF6750A4;
     showCoachDetails = _prefs.getBool('showCoachDetails') ?? true;
+    appFont = AppFont.values.asNameMap()[_prefs.getString('appFont')] ?? AppFont.classic;
+    saveMatchHistory = _prefs.getBool('saveMatchHistory') ?? true;
+    analysisStrength =
+        AnalysisStrength.values.asNameMap()[_prefs.getString('analysisStrength')] ?? AnalysisStrength.standard;
   }
 
   static const claudeModels = ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'];
@@ -109,6 +138,12 @@ class SettingsController extends ChangeNotifier {
   late int eloRating;
   late int themeSeedColor;
   late bool showCoachDetails;
+  late AppFont appFont;
+
+  /// Keep every finished (or abandoned) Play & Learn game, with its moves,
+  /// in the on-device match history.
+  late bool saveMatchHistory;
+  late AnalysisStrength analysisStrength;
 
   String keyFor(CoachProvider p) => _keys[p] ?? '';
   String modelFor(CoachProvider p) => _models[p] ?? p.defaultModel;
@@ -265,6 +300,24 @@ class SettingsController extends ChangeNotifier {
   Future<void> setShowCoachDetails(bool v) async {
     showCoachDetails = v;
     await _prefs.setBool('showCoachDetails', v);
+    notifyListeners();
+  }
+
+  Future<void> setAppFont(AppFont v) async {
+    appFont = v;
+    await _prefs.setString('appFont', v.name);
+    notifyListeners();
+  }
+
+  Future<void> setSaveMatchHistory(bool v) async {
+    saveMatchHistory = v;
+    await _prefs.setBool('saveMatchHistory', v);
+    notifyListeners();
+  }
+
+  Future<void> setAnalysisStrength(AnalysisStrength v) async {
+    analysisStrength = v;
+    await _prefs.setString('analysisStrength', v.name);
     notifyListeners();
   }
 

@@ -13,12 +13,13 @@ import '../engine/engine_service.dart';
 import '../engine/evaluator.dart' show pieceValue;
 import '../engine/search.dart';
 import '../models/move_quality.dart';
+import '../services/match_history.dart';
 import '../services/saved_game.dart';
 import '../services/settings.dart';
 import '../voice/speech_text.dart';
 import '../voice/voice_service.dart';
 
-enum GamePhase { playerTurn, analyzing, coaching, engineThinking, gameOver }
+enum GamePhase { playerTurn, analyzing, coaching, engineThinking, gameOver, review }
 
 enum CoachMessageKind { coach, tip, warning, praise, user, error, system }
 
@@ -91,6 +92,68 @@ class LinePreview {
   }
 }
 
+/// Post-game review state. Replays the match move by move and pauses on each
+/// flagged move so the student can study the position the coach is talking
+/// about. The board shows the position *before* the bad move, so the student
+/// can think about what they should have played instead.
+class ReviewState {
+  ReviewState(this.history);
+
+  /// The history being reviewed, in order.
+  final List<HistoryEntry> history;
+
+  /// Index of the move currently under review, or null when we are simply
+  /// advancing between moves.
+  int? reviewIndex;
+
+  /// The index of the move currently shown on the board.
+  int boardIndex = 0;
+
+  /// The review has been dismissed by the student.
+  bool done = false;
+
+  /// Whether the replay is advancing on its own.
+  bool autoPlaying = true;
+
+  /// Whether the coach is still talking about the current flagged move.
+  bool explaining = false;
+
+  List<int> get flagged =>
+      [for (final (i, h) in history.indexed) if (h.review != null && h.review!.quality.isBad) i];
+
+  bool get atEnd => boardIndex >= history.length;
+
+  bool get atFlagged => reviewIndex != null && flagged.contains(reviewIndex);
+
+  bool get hasFlagged => flagged.isNotEmpty;
+
+  /// Position shown on the board at [boardIndex]: the one *before* that move.
+  Position get boardPosition {
+    if (boardIndex <= 0) return history.first.before;
+    return history[boardIndex - 1].after;
+  }
+
+  Move? get boardMove =>
+      boardIndex > 0 && boardIndex <= history.length ? history[boardIndex - 1].move : null;
+
+  /// Shapes for the board: the student's actual move (red) and the engine's
+  /// preferred move (green) when a flagged move is under review.
+  Set<Shape> get boardShapes {
+    final i = reviewIndex;
+    if (i == null) return {};
+    final r = history[i].review!;
+    final shapes = <Shape>{
+      if (r.move is NormalMove)
+        Arrow(color: const Color(0xCCFF5252), orig: (r.move as NormalMove).from, dest: (r.move as NormalMove).to),
+    };
+    final best = r.bestMove;
+    if (best is NormalMove) {
+      shapes.add(Arrow(color: const Color(0xCC69F0AE), orig: best.from, dest: best.to));
+    }
+    return shapes;
+  }
+}
+
 /// Drives a "play and learn" game: the student's moves are graded by the
 /// engine, questionable ones are explained by the coach with an offer to
 /// retry, and the engine opponent answers at the chosen skill level.
@@ -100,6 +163,7 @@ class GameController extends ChangeNotifier {
     required this.coach,
     required this.settings,
     this.voice,
+    this.matchHistory,
   });
 
   final EngineService engine;
@@ -108,6 +172,10 @@ class GameController extends ChangeNotifier {
 
   /// Optional spoken coach; null in tests and on the web.
   final VoiceService? voice;
+
+  /// Where finished and abandoned games are recorded when
+  /// [SettingsController.saveMatchHistory] is on; null disables recording.
+  final MatchHistory? matchHistory;
 
   bool get _speak => voice?.enabled ?? false;
   bool get _speakPreview => _speak && settings.voicePreview;
@@ -150,9 +218,21 @@ class GameController extends ChangeNotifier {
   LinePreview? preview;
   Timer? _previewTimer;
 
+  /// Post-game review in progress: replays the whole match and stops on every
+  /// flagged move so the student can see why it was bad.
+  ReviewState? review;
+
   final Set<String> _shownTips = {};
   int _generation = 0;
   bool _summaryRequested = false;
+
+  /// Identity of the current game in the match history. A take-back after
+  /// the end keeps it, so finishing again replaces the earlier record.
+  String matchId = _newMatchId();
+  DateTime _startedAt = DateTime.now();
+
+  static String _newMatchId() =>
+      '${DateTime.now().microsecondsSinceEpoch}-${math.Random().nextInt(1 << 20).toRadixString(36)}';
 
   // ---------------------------------------------------------------------------
   // Derived state
@@ -164,12 +244,24 @@ class GameController extends ChangeNotifier {
   Position get displayedPosition {
     final pv = preview;
     if (pv != null) return pv.position;
+    final rv = review;
+    if (rv != null) return rv.boardPosition;
     return viewIndex == null ? position : history[viewIndex!].after;
+  }
+
+  /// Position shown during a post-game review: the board sits *before* the
+  /// move under review so the student can think about what to play instead.
+  Position get reviewBoardPosition {
+    final rv = review!;
+    if (rv.boardIndex <= 0) return rv.history.first.before;
+    return rv.history[rv.boardIndex - 1].after;
   }
 
   Move? get displayedLastMove {
     final pv = preview;
     if (pv != null) return pv.lastMove;
+    final rv = review;
+    if (rv != null) return rv.boardMove;
     return viewIndex == null ? (history.isEmpty ? null : history.last.move) : history[viewIndex!].move;
   }
 
@@ -177,6 +269,8 @@ class GameController extends ChangeNotifier {
   Set<Shape> get displayedShapes {
     final pv = preview;
     if (pv != null) return pv.shapes;
+    final rv = review;
+    if (rv != null) return rv.boardShapes;
     return viewIndex == null ? hintShapes : const {};
   }
 
@@ -209,6 +303,7 @@ class GameController extends ChangeNotifier {
   // Game lifecycle
 
   void newGame({Side? side, String? startFen}) {
+    if (isInProgress) recordAbandoned();
     _reset(side: side, startFen: startFen);
     _say(CoachMessageKind.system,
         'New game. You play ${sideName(playerSide)}. I will watch every move and step in when something can be improved. Ask me anything at any time.');
@@ -224,6 +319,8 @@ class GameController extends ChangeNotifier {
   /// re-reviewing them.
   void resumeGame(SavedGame saved) {
     _reset(side: saved.playerSide, startFen: saved.startFen);
+    if (saved.matchId != null) matchId = saved.matchId!;
+    if (saved.startedAt != null) _startedAt = saved.startedAt!;
     for (final uci in saved.moves) {
       final move = Move.parse(uci);
       if (move == null || !position.isLegal(move)) break;
@@ -246,10 +343,54 @@ class GameController extends ChangeNotifier {
         startFen: history.isEmpty ? position.fen : history.first.before.fen,
         playerSide: playerSide,
         moves: [for (final h in history) h.move.uci],
+        matchId: matchId,
+        startedAt: _startedAt,
       );
 
   /// Whether leaving now would lose a game worth keeping.
   bool get isInProgress => history.isNotEmpty && phase != GamePhase.gameOver;
+
+  /// The current game as a match history record; unfinished games get the
+  /// result "*".
+  MatchRecord matchRecord() {
+    final over = gameOverText != null;
+    final result = !over
+        ? '*'
+        : switch (winner) {
+            Side.white => '1-0',
+            Side.black => '0-1',
+            null => '1/2-1/2',
+          };
+    return MatchRecord(
+      id: matchId,
+      startedAt: _startedAt,
+      endedAt: DateTime.now(),
+      startFen: history.isEmpty ? position.fen : history.first.before.fen,
+      playerSide: playerSide,
+      moves: [for (final h in history) h.move.uci],
+      result: result,
+      resultText: over ? (gameOverText ?? '') : 'Not finished.',
+      endReason: over ? (endReason ?? 'Game over') : 'Abandoned',
+      opening: openingName,
+      opponentElo: settings.eloRating,
+      liveGrades: {
+        for (final (i, h) in history.indexed)
+          if (h.review != null) i: h.review!.quality,
+      },
+    );
+  }
+
+  /// Stores an unfinished game in the match history (leaving without
+  /// saving, or starting another game mid-way).
+  void recordAbandoned() {
+    if (history.any((h) => h.before.turn == playerSide)) _record();
+  }
+
+  void _record() {
+    final store = matchHistory;
+    if (store == null || !settings.saveMatchHistory || history.isEmpty) return;
+    unawaited(store.upsert(matchRecord()));
+  }
 
   void _kickOff() {
     if (position.turn != playerSide) {
@@ -281,6 +422,8 @@ class GameController extends ChangeNotifier {
     gameOverMessageIndex = null;
     _summaryRequested = false;
     phase = GamePhase.playerTurn;
+    matchId = _newMatchId();
+    _startedAt = DateTime.now();
   }
 
   void resign() {
@@ -515,6 +658,153 @@ class GameController extends ChangeNotifier {
     if (_speakPreview) voice?.stop();
     preview = null;
     notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Post-game review (Duolingo-style)
+
+  /// Starts the post-game review: replays the whole match and stops on every
+  /// flagged move so the student can study it.
+  void startReview() {
+    if (history.isEmpty) return;
+    final gen = _generation;
+    _previewTimer?.cancel();
+    preview = null;
+    viewIndex = null;
+    review = ReviewState(history.toList())..boardIndex = 0;
+    phase = GamePhase.review;
+    _say(CoachMessageKind.system, 'Reviewing the game. I will replay it and stop on every move that needs work.');
+    notifyListeners();
+    _scheduleReviewStep(gen);
+  }
+
+  void _scheduleReviewStep(int gen) {
+    final rv = review;
+    if (rv == null || !rv.autoPlaying || rv.done) return;
+    _previewTimer?.cancel();
+    final stepMs = rv.explaining ? 0 : 900;
+    _previewTimer = Timer(Duration(milliseconds: stepMs), () async {
+      if (review != rv || rv.done) return;
+      if (gen != _generation) return;
+      if (rv.explaining) {
+        // Wait for the coach to finish talking about this move.
+        return;
+      }
+      if (rv.atEnd) {
+        rv.autoPlaying = false;
+        notifyListeners();
+        _reviewSummary(gen);
+        return;
+      }
+      rv.boardIndex++;
+      if (rv.flagged.contains(rv.boardIndex - 1)) {
+        // Stop here: the student's move was flagged.
+        final entry = history[rv.boardIndex - 1];
+        rv.reviewIndex = rv.boardIndex - 1;
+        rv.explaining = true;
+        notifyListeners();
+        await _explainReview(entry, gen);
+        if (review != rv || rv.done || gen != _generation) return;
+        rv.explaining = false;
+        rv.reviewIndex = null;
+        notifyListeners();
+        _scheduleReviewStep(gen);
+        return;
+      }
+      notifyListeners();
+      _scheduleReviewStep(gen);
+    });
+  }
+
+  /// The student taps "next" on a flagged move: skip the explanation and
+  /// advance to the next flagged move (or the end).
+  void reviewNext() {
+    final rv = review;
+    if (rv == null) return;
+    _previewTimer?.cancel();
+    rv.explaining = false;
+    rv.reviewIndex = null;
+    rv.autoPlaying = true;
+    notifyListeners();
+    _scheduleReviewStep(_generation);
+  }
+
+  /// Move the board back one move during review.
+  void reviewPrevious() {
+    final rv = review;
+    if (rv == null || rv.boardIndex <= 0) return;
+    _previewTimer?.cancel();
+    rv.autoPlaying = false;
+    rv.explaining = false;
+    rv.reviewIndex = null;
+    rv.boardIndex--;
+    notifyListeners();
+  }
+
+  /// Toggle auto-advance of the review replay.
+  void reviewTogglePlay() {
+    final rv = review;
+    if (rv == null) return;
+    rv.autoPlaying = !rv.autoPlaying;
+    if (rv.autoPlaying) _scheduleReviewStep(_generation);
+    else _previewTimer?.cancel();
+    notifyListeners();
+  }
+
+  /// Skip the rest of the review and return to the game-over screen.
+  void reviewDismiss() {
+    final rv = review;
+    if (rv == null) return;
+    _previewTimer?.cancel();
+    rv.done = true;
+    review = null;
+    phase = GamePhase.gameOver;
+    notifyListeners();
+  }
+
+  void _reviewSummary(int gen) {
+    if (gen != _generation || review != null) return;
+    final flagged = [for (final h in history) if (h.review != null && h.review!.quality.isBad) h.review!];
+    if (flagged.isEmpty) {
+      _say(CoachMessageKind.praise, 'No flagged moves — clean game. Well done.');
+      return;
+    }
+    if (settings.hasApiKey) {
+      unawaited(_stream(
+        coach.gameSummary(
+          context: _context(),
+          result: gameOverText ?? 'Game over',
+          reviews: playerReviews,
+          accuracy: accuracy,
+        ),
+        CoachMessageKind.coach,
+        gen,
+      ));
+    } else {
+      _say(CoachMessageKind.coach,
+          'You flagged ${flagged.length} move${flagged.length == 1 ? '' : 's'}. '
+          'Go back and look at the red arrows: that is what you played, the green one is what the engine preferred.');
+    }
+  }
+
+  Future<void> _explainReview(HistoryEntry entry, int gen) async {
+    final review = entry.review!;
+    final header = '${review.quality.label}: ${friendlyMove(review.before, review.move, viewer: playerSide)}. '
+        'The evaluation went from ${review.evalBefore} to ${review.evalAfter} '
+        '(plus is good for White, minus for Black).';
+    _say(CoachMessageKind.warning, header);
+    if (settings.hasApiKey) {
+      final context = GameContext(
+        position: review.before,
+        sanHistory: sanHistory.take(history.indexOf(entry) + 1).toList(),
+        playerSide: playerSide,
+        openingName: openingName,
+        analysis: null,
+      );
+      await _stream(coach.explainMistake(review, context), CoachMessageKind.coach, gen);
+    } else {
+      _say(CoachMessageKind.coach, _localExplanation(review));
+    }
   }
 
   @override
@@ -799,6 +1089,7 @@ class GameController extends ChangeNotifier {
     this.winner = winner;
     endReason = reason;
     gameOverMessageIndex = messages.length;
+    _record();
     unawaited(HapticFeedback.heavyImpact());
     if (_speak) unawaited(voice!.say('Game over. $text', interrupt: true));
     _say(CoachMessageKind.system, 'Game over: $text');

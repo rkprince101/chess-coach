@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:chess/voice/voice_service.dart';
 
 /// Pixel 7-ish logical size. Any RenderFlex overflow fails these tests.
 const phone = Size(411, 923);
@@ -24,6 +25,7 @@ Future<SettingsController> settings() async {
 Widget wrap(SettingsController s, Widget child, {EngineService? engine}) => MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: s),
+        ChangeNotifierProvider.value(value: VoiceService(s)),
         Provider(create: (_) => engine ?? EngineService()),
         Provider(create: (_) => CoachService(s)),
       ],
@@ -37,7 +39,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(ChessCoachApp(settings: s));
+    await tester.pumpWidget(ChessCoachApp(settings: s, voice: VoiceService(s)));
     await tester.pumpAndSettle();
     expect(find.text('Play & Learn'), findsOneWidget);
 

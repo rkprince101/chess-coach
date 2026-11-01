@@ -3,6 +3,7 @@ import 'package:chess/coach/llm_client.dart';
 import 'package:chess/engine/engine_service.dart';
 import 'package:chess/services/settings.dart';
 import 'package:chess/ui/screens/topic_screen.dart';
+import 'package:chess/voice/voice_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -38,6 +39,7 @@ void main() {
     await tester.pumpWidget(MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: settings),
+        ChangeNotifierProvider.value(value: VoiceService(settings)),
         Provider(create: (_) => EngineService()),
         Provider(create: (_) => CoachService(settings, clientOverride: llm)),
       ],
@@ -75,6 +77,7 @@ void main() {
     await tester.pumpWidget(MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: settings),
+        ChangeNotifierProvider.value(value: VoiceService(settings)),
         Provider(create: (_) => EngineService()),
         Provider(create: (_) => CoachService(settings, clientOverride: llm)),
       ],

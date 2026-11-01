@@ -325,6 +325,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ),
                   ),
+                  Padding(
+                    padding: _rowPadding,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('Font', style: text.titleMedium),
+                        const SizedBox(height: 12),
+                        SegmentedButton<AppFont>(
+                          segments: [
+                            for (final f in AppFont.values) ButtonSegment(value: f, label: Text(f.label)),
+                          ],
+                          selected: {s.appFont},
+                          showSelectedIcon: false,
+                          onSelectionChanged: (v) => s.setAppFont(v.first),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(s.appFont.description, style: note),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SegmentHeader('Game history'),
+              SegmentedList(
+                children: [
+                  SwitchListTile(
+                    contentPadding: _tilePadding,
+                    value: s.saveMatchHistory,
+                    title: const Text('Save played games'),
+                    subtitle: const Text(
+                        'Keep every game on this device with all its moves, the result and the coach\'s grades, ready to analyse.'),
+                    onChanged: s.setSaveMatchHistory,
+                  ),
+                  Padding(
+                    padding: _rowPadding,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('Analysis strength', style: text.titleMedium),
+                        const SizedBox(height: 12),
+                        SegmentedButton<AnalysisStrength>(
+                          segments: [
+                            for (final a in AnalysisStrength.values) ButtonSegment(value: a, label: Text(a.label)),
+                          ],
+                          selected: {s.analysisStrength},
+                          showSelectedIcon: false,
+                          onSelectionChanged: (v) => s.setAnalysisStrength(v.first),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                            'Engine time per position when analysing a saved game: '
+                            '${(s.analysisStrength.timeMs / 1000).toStringAsFixed(s.analysisStrength.timeMs < 1000 ? 2 : 1)} s.',
+                            style: note),
+                      ],
+                    ),
+                  ),
                 ],
               ),
               const SegmentHeader('Board'),
